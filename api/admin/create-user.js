@@ -1,8 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
 
-// Server-only env vars — deliberately NOT prefixed with VITE_ so Vite never
-// bundles them into client-side JS. Set these in Vercel → Project Settings
-// → Environment Variables, not in .env (which only feeds the frontend).
 const supabaseUrl = process.env.SUPABASE_URL
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
 
@@ -12,6 +9,7 @@ export default async function handler(req, res) {
   }
 
   if (!supabaseUrl || !serviceRoleKey) {
+    console.error('MISSING ENV VARS. SUPABASE_URL set:', !!supabaseUrl, 'SUPABASE_SERVICE_ROLE_KEY set:', !!serviceRoleKey)
     return res.status(500).json({ error: 'Server misconfigured: missing Supabase service credentials' })
   }
 
@@ -23,27 +21,34 @@ export default async function handler(req, res) {
 
   const admin = createClient(supabaseUrl, serviceRoleKey)
 
-  // 1. Identify the caller from their access token.
   const { data: { user: caller }, error: callerErr } = await admin.auth.getUser(token)
   if (callerErr || !caller) {
+    console.error('CALLER IDENTITY CHECK FAILED:', callerErr?.message)
     return res.status(401).json({ error: 'Invalid or expired session' })
   }
+  console.log('Caller identified:', caller.id, caller.email)
 
-  // 2. Confirm the caller is an active admin. Using the service-role client
-  // here deliberately bypasses RLS so we can check the role directly —
-  // this is the ONE place that's allowed, because we've just verified
-  // the caller's identity above.
   const { data: callerProfile, error: profileErr } = await admin
     .from('profiles')
     .select('role, is_active')
     .eq('id', caller.id)
     .single()
 
-  if (profileErr || !callerProfile || callerProfile.role !== 'admin' || !callerProfile.is_active) {
+  if (profileErr) {
+    console.error('PROFILE LOOKUP FAILED:', profileErr.message, profileErr.code)
+    return res.status(403).json({ error: 'Admin access required' })
+  }
+  if (!callerProfile) {
+    console.error('NO PROFILE ROW FOUND for caller id:', caller.id)
+    return res.status(403).json({ error: 'Admin access required' })
+  }
+  console.log('Caller profile:', callerProfile)
+
+  if (callerProfile.role !== 'admin' || !callerProfile.is_active) {
+    console.error('ROLE/ACTIVE CHECK FAILED. role:', callerProfile.role, 'is_active:', callerProfile.is_active)
     return res.status(403).json({ error: 'Admin access required' })
   }
 
-  // 3. Validate input.
   const { email, password, fullName, role } = req.body || {}
   if (!email || !password || !fullName || !role) {
     return res.status(400).json({ error: 'email, password, fullName, and role are required' })
@@ -55,8 +60,6 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Password must be at least 8 characters' })
   }
 
-  // 4. Create the auth user, pre-confirmed (admin-created accounts skip
-  // email verification since the admin is vouching for them directly).
   const { data: created, error: createErr } = await admin.auth.admin.createUser({
     email,
     password,
@@ -65,23 +68,22 @@ export default async function handler(req, res) {
   })
 
   if (createErr) {
+    console.error('CREATE USER FAILED:', createErr.message)
     return res.status(400).json({ error: createErr.message })
   }
 
   const newUserId = created.user.id
 
-  // 5. The DB trigger already inserted a default profile row (role
-  // defaults to 'patient'). Update it to the role the admin actually chose.
   const { error: updateErr } = await admin
     .from('profiles')
     .update({ role, full_name: fullName, email })
     .eq('id', newUserId)
 
   if (updateErr) {
+    console.error('PROFILE UPDATE FAILED:', updateErr.message)
     return res.status(500).json({ error: `Account created but profile update failed: ${updateErr.message}` })
   }
 
-  // 6. Audit trail.
   await admin.from('audit_logs').insert({
     user_id: caller.id,
     action: `Created ${role} account for ${email}`,
