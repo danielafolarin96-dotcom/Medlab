@@ -7,6 +7,8 @@ import AdminDashboard from './pages/admin/AdminDashboard'
 import AdminUsers from './pages/admin/AdminUsers'
 import AdminAuditLog from './pages/admin/AdminAuditLog'
 import ClinicianDashboard from './pages/clinician/ClinicianDashboard'
+import ClinicianPatients from './pages/clinician/ClinicianPatients'
+import PatientDetail from './pages/clinician/PatientDetail'
 import PatientDashboard from './pages/patient/PatientDashboard'
 
 const HOME_BY_ROLE = { admin: '/admin', clinician: '/clinician', patient: '/patient' }
@@ -48,12 +50,27 @@ export default function App() {
           </ProtectedRoute>
         }
       />
-
       <Route
-        path="/clinician/*"
+        path="/clinician"
         element={
           <ProtectedRoute allowedRoles={['clinician']}>
             <ClinicianDashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/clinician/patients"
+        element={
+          <ProtectedRoute allowedRoles={['clinician']}>
+            <ClinicianPatients />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/clinician/patients/:patientId"
+        element={
+          <ProtectedRoute allowedRoles={['clinician']}>
+            <PatientDetail />
           </ProtectedRoute>
         }
       />

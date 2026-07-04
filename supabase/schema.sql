@@ -20,6 +20,7 @@ end $$;
 create table if not exists public.profiles (
   id          uuid primary key references auth.users(id) on delete cascade,
   full_name   text not null default '',
+  email       text,
   role        user_role not null default 'patient',
   is_active   boolean not null default true,
   created_at  timestamptz not null default now()
@@ -35,8 +36,8 @@ security definer
 set search_path = public
 as $$
 begin
-  insert into public.profiles (id, full_name)
-  values (new.id, coalesce(new.raw_user_meta_data->>'full_name', ''));
+  insert into public.profiles (id, full_name, email)
+  values (new.id, coalesce(new.raw_user_meta_data->>'full_name', ''), new.email);
   return new;
 end;
 $$;
@@ -135,6 +136,22 @@ as $$
 $$;
 
 -- ---------------------------------------------------------------------
+-- 7b. TABLE PRIVILEGES
+-- RLS policies only control *which rows* are visible — the `authenticated`
+-- role also needs a base grant to query the tables at all, or every query
+-- fails with "permission denied for table X" before RLS is even evaluated.
+-- ---------------------------------------------------------------------
+grant usage on schema public to authenticated;
+
+grant select, insert, update, delete on
+  public.profiles,
+  public.patients,
+  public.lab_results,
+  public.ml_prediction_logs,
+  public.audit_logs
+to authenticated;
+
+-- ---------------------------------------------------------------------
 -- 8. ROW LEVEL SECURITY
 -- ---------------------------------------------------------------------
 alter table public.profiles           enable row level security;
@@ -144,10 +161,15 @@ alter table public.ml_prediction_logs enable row level security;
 alter table public.audit_logs         enable row level security;
 
 -- PROFILES: everyone can read their own row (needed to know their own role);
--- admins can read/update everyone.
+-- admins can read/update everyone; clinicians can additionally see
+-- patient-role profiles only (needed to link a patient record to their login).
 drop policy if exists profiles_select_own_or_admin on public.profiles;
-create policy profiles_select_own_or_admin on public.profiles
-  for select using (id = auth.uid() or public.current_role() = 'admin');
+create policy profiles_select_own_or_privileged on public.profiles
+  for select using (
+    id = auth.uid()
+    or public.current_role() = 'admin'
+    or (public.current_role() = 'clinician' and role = 'patient')
+  );
 
 drop policy if exists profiles_update_admin_only on public.profiles;
 create policy profiles_update_admin_only on public.profiles
@@ -182,11 +204,13 @@ create policy ml_logs_staff_only on public.ml_prediction_logs
   for all using (public.current_role() in ('admin', 'clinician'))
   with check (public.current_role() in ('admin', 'clinician'));
 
--- AUDIT_LOGS: admin-only.
+-- AUDIT_LOGS: only admins can read the log; any staff member (admin or
+-- clinician) can write an entry for their own action.
 drop policy if exists audit_logs_admin_only on public.audit_logs;
-create policy audit_logs_admin_only on public.audit_logs
-  for all using (public.current_role() = 'admin')
-  with check (public.current_role() = 'admin');
+create policy audit_logs_select_admin_only on public.audit_logs
+  for select using (public.current_role() = 'admin');
+create policy audit_logs_insert_staff on public.audit_logs
+  for insert with check (public.current_role() in ('admin', 'clinician'));
 
 -- ---------------------------------------------------------------------
 -- 9. BOOTSTRAP: promote your first account to admin
