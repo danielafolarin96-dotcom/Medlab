@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import AppShell from '../../components/AppShell'
 import StatusPill from '../../components/StatusPill'
 import { SkeletonLine, SkeletonTable } from '../../components/Skeleton'
 import { supabase } from '../../lib/supabaseClient'
+import { computeTrendsByAnalyte } from '../../lib/trend'
 
 export default function PatientDetail() {
   const { patientId } = useParams()
@@ -30,6 +31,8 @@ export default function PatientDetail() {
     })
     return () => { mounted = false }
   }, [patientId])
+
+  const trends = useMemo(() => computeTrendsByAnalyte(results), [results])
 
   return (
     <AppShell>
@@ -79,6 +82,30 @@ export default function PatientDetail() {
               </span>
             </p>
           </div>
+
+          {Object.keys(trends).length > 0 && (
+            <div className="mb-6">
+              <h2 className="text-sm font-semibold text-text-primary mb-3">Trends</h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {Object.entries(trends).map(([analyte, t]) => (
+                  <div key={analyte} className="bg-surface border border-line rounded-xl p-4 shadow-card">
+                    <div className="flex items-start justify-between gap-3 mb-2">
+                      <p className="text-sm font-medium text-text-primary">{analyte}</p>
+                      <StatusPill status={t.label.toLowerCase()} label={t.label} />
+                    </div>
+                    <p className="text-xs text-text-muted tabular">
+                      Distance from normal range moved {t.percentChange >= 0 ? '+' : ''}
+                      {t.percentChange.toFixed(0)} points over last {t.pointsUsed} tests
+                    </p>
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-text-muted mt-2">
+                Statistical trend, not machine learning — based on percentage change, moving
+                average, and slope of each result's distance from the normal range over time.
+              </p>
+            </div>
+          )}
 
           <div className="bg-surface border border-line rounded-xl overflow-hidden shadow-card">
             <div className="grid grid-cols-[1.2fr_0.9fr_1.1fr_0.8fr_0.9fr_0.9fr] gap-4 px-5 py-3 border-b border-line bg-canvas text-xs font-semibold text-text-muted uppercase tracking-wide">
