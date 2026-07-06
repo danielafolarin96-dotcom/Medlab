@@ -72,22 +72,68 @@ export default function ResultEntry() {
     const numericValue = Number(value)
     const isAbnormal = numericValue < matchedRange.ref_low || numericValue > matchedRange.ref_high
 
-    const { error: insertErr } = await supabase.from('lab_results').insert({
-      patient_id: patientId,
-      entered_by: user.id,
-      analyte,
-      value: numericValue,
-      unit: matchedRange.unit,
-      ref_low: matchedRange.ref_low,
-      ref_high: matchedRange.ref_high,
-      is_abnormal: isAbnormal,
-      test_date: testDate,
-    })
+    // Random Forest inference — read-only, uses this clinician's own session
+    // token so it only ever sees what RLS already permits. If it fails for
+    // any reason, the result is still saved with the rule-based flag; ML
+    // fields are simply left null rather than blocking the whole submission.
+    let mlProbability = null
+    let mlFeatures = null
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch('/api/predict', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          patientId,
+          analyte,
+          value: numericValue,
+          refLow: matchedRange.ref_low,
+          refHigh: matchedRange.ref_high,
+        }),
+      })
+      if (res.ok) {
+        const body = await res.json()
+        mlProbability = body.probability
+        mlFeatures = body
+      }
+    } catch {
+      // Silently degrade — the rule-based flag still gets saved below.
+    }
+
+    const { data: created, error: insertErr } = await supabase
+      .from('lab_results')
+      .insert({
+        patient_id: patientId,
+        entered_by: user.id,
+        analyte,
+        value: numericValue,
+        unit: matchedRange.unit,
+        ref_low: matchedRange.ref_low,
+        ref_high: matchedRange.ref_high,
+        is_abnormal: isAbnormal,
+        ml_probability: mlProbability,
+        test_date: testDate,
+      })
+      .select()
+      .single()
 
     if (insertErr) {
       setError(insertErr.message)
       setSubmitting(false)
       return
+    }
+
+    if (mlFeatures) {
+      await supabase.from('ml_prediction_logs').insert({
+        result_id: created.id,
+        model_version: mlFeatures.modelVersion,
+        input_features: mlFeatures.featuresUsed,
+        is_abnormal: mlFeatures.isAbnormal,
+        probability: mlFeatures.probability,
+      })
     }
 
     await supabase.from('audit_logs').insert({
@@ -103,6 +149,7 @@ export default function ResultEntry() {
       unit: matchedRange.unit,
       analyte,
       value: numericValue,
+      mlProbability,
     })
     setAnalyte('')
     setValue('')
@@ -147,19 +194,31 @@ export default function ResultEntry() {
       ) : (
         <>
           {result && (
-            <div className="bg-surface border border-line rounded-xl p-5 shadow-card mb-6 flex items-start justify-between gap-4">
-              <div>
-                <p className="text-sm font-semibold text-text-primary mb-1">
-                  {result.analyte}: <span className="tabular">{result.value} {result.unit}</span>
-                </p>
-                <p className="text-xs text-text-muted tabular">
-                  Normal range: {result.refLow}–{result.refHigh} {result.unit}
-                </p>
+            <div className="bg-surface border border-line rounded-xl p-5 shadow-card mb-6">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-sm font-semibold text-text-primary mb-1">
+                    {result.analyte}: <span className="tabular">{result.value} {result.unit}</span>
+                  </p>
+                  <p className="text-xs text-text-muted tabular">
+                    Normal range: {result.refLow}–{result.refHigh} {result.unit}
+                  </p>
+                </div>
+                <StatusPill
+                  status={result.isAbnormal ? 'abnormal' : 'normal'}
+                  label={result.isAbnormal ? 'Abnormal' : 'Normal'}
+                />
               </div>
-              <StatusPill
-                status={result.isAbnormal ? 'abnormal' : 'normal'}
-                label={result.isAbnormal ? 'Abnormal' : 'Normal'}
-              />
+              <div className="mt-3 pt-3 border-t border-line flex items-center justify-between">
+                <p className="text-xs text-text-secondary">
+                  Random Forest model {result.mlProbability === null ? '— unavailable for this result' : ''}
+                </p>
+                {result.mlProbability !== null && (
+                  <span className="text-xs font-semibold text-text-primary tabular">
+                    {Math.round(result.mlProbability * 100)}% probability abnormal
+                  </span>
+                )}
+              </div>
             </div>
           )}
 

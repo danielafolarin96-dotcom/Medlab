@@ -18,7 +18,7 @@ export default function PatientDetail() {
       supabase.from('patients').select('*').eq('id', patientId).maybeSingle(),
       supabase
         .from('lab_results')
-        .select('id, analyte, value, unit, ref_low, ref_high, is_abnormal, test_date')
+        .select('id, analyte, value, unit, ref_low, ref_high, is_abnormal, ml_probability, test_date')
         .eq('patient_id', patientId)
         .order('test_date', { ascending: false }),
     ]).then(([{ data: p, error }, { data: r }]) => {
@@ -81,11 +81,12 @@ export default function PatientDetail() {
           </div>
 
           <div className="bg-surface border border-line rounded-xl overflow-hidden shadow-card">
-            <div className="grid grid-cols-[1.3fr_1fr_1.2fr_0.8fr_0.9fr] gap-4 px-5 py-3 border-b border-line bg-canvas text-xs font-semibold text-text-muted uppercase tracking-wide">
+            <div className="grid grid-cols-[1.2fr_0.9fr_1.1fr_0.8fr_0.9fr_0.9fr] gap-4 px-5 py-3 border-b border-line bg-canvas text-xs font-semibold text-text-muted uppercase tracking-wide">
               <span>Analyte</span>
               <span>Value</span>
               <span>Normal range</span>
               <span>Flag</span>
+              <span>RF probability</span>
               <span>Date</span>
             </div>
 
@@ -97,7 +98,7 @@ export default function PatientDetail() {
               results.map((r) => (
                 <div
                   key={r.id}
-                  className="grid grid-cols-[1.3fr_1fr_1.2fr_0.8fr_0.9fr] items-center gap-4 px-5 py-3.5 border-b border-line last:border-b-0 text-sm"
+                  className="grid grid-cols-[1.2fr_0.9fr_1.1fr_0.8fr_0.9fr_0.9fr] items-center gap-4 px-5 py-3.5 border-b border-line last:border-b-0 text-sm"
                 >
                   <span className="text-text-primary font-medium truncate">{r.analyte}</span>
                   <span className="text-text-secondary tabular">{r.value} {r.unit}</span>
@@ -106,6 +107,11 @@ export default function PatientDetail() {
                     status={r.is_abnormal ? 'abnormal' : 'normal'}
                     label={r.is_abnormal ? 'Abnormal' : 'Normal'}
                   />
+                  <span className="text-text-secondary tabular">
+                    {r.ml_probability !== null && r.ml_probability !== undefined
+                      ? `${Math.round(r.ml_probability * 100)}%`
+                      : '—'}
+                  </span>
                   <span className="text-text-secondary tabular">{r.test_date}</span>
                 </div>
               ))
