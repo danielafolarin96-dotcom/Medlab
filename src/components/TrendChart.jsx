@@ -12,6 +12,18 @@ import {
 // Postgres `numeric` columns arrive as JSON strings (see src/lib/trend.js
 // for the full explanation) — explicitly coerce everything here too, so
 // this component is correct regardless of what shape the caller passes in.
+// Recharts' automatic Y-axis tick generation can degenerate on small or
+// tightly-spaced numeric ranges — verified in testing, where it produced
+// three duplicate tick labels on a real chart. Computing ticks explicitly
+// removes that failure mode entirely rather than hoping the library's
+// internal "nice number" algorithm behaves for every possible range.
+function computeTicks(min, max, count = 5) {
+  const step = (max - min) / (count - 1)
+  const decimals = Math.abs(max - min) < 20 ? 1 : 0
+  const raw = Array.from({ length: count }, (_, i) => Number((min + step * i).toFixed(decimals)))
+  return [...new Set(raw)] // guard against rounding ever collapsing two ticks to the same value
+}
+
 export default function TrendChart({ results, refLow, refHigh, unit }) {
   const refLowNum = Number(refLow)
   const refHighNum = Number(refHigh)
@@ -24,6 +36,9 @@ export default function TrendChart({ results, refLow, refHigh, unit }) {
   const dataMin = Math.min(...values, refLowNum)
   const dataMax = Math.max(...values, refHighNum)
   const padding = (dataMax - dataMin) * 0.15 || 1
+  const yMin = dataMin - padding
+  const yMax = dataMax + padding
+  const yTicks = computeTicks(yMin, yMax)
 
   return (
     <div className="h-56">
@@ -36,9 +51,10 @@ export default function TrendChart({ results, refLow, refHigh, unit }) {
             tickFormatter={(d) => new Date(d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
           />
           <YAxis
-            domain={[dataMin - padding, dataMax + padding]}
+            domain={[yMin, yMax]}
+            ticks={yTicks}
             tick={{ fontSize: 11, fill: '#5B6472' }}
-            width={40}
+            width={44}
           />
           <ReferenceArea
             y1={refLowNum}
