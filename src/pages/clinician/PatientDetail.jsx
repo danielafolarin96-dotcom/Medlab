@@ -2,9 +2,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import AppShell from '../../components/AppShell'
 import StatusPill from '../../components/StatusPill'
+import TrendChart from '../../components/TrendChart'
 import { SkeletonLine, SkeletonTable } from '../../components/Skeleton'
 import { supabase } from '../../lib/supabaseClient'
-import { computeTrendsByAnalyte } from '../../lib/trend'
+import { computeTrendsByAnalyte, groupByAnalyte } from '../../lib/trend'
 
 export default function PatientDetail() {
   const { patientId } = useParams()
@@ -33,6 +34,11 @@ export default function PatientDetail() {
   }, [patientId])
 
   const trends = useMemo(() => computeTrendsByAnalyte(results), [results])
+  const chartGroups = useMemo(() => {
+    const grouped = groupByAnalyte(results)
+    // Only worth charting with at least 2 points on a line.
+    return Object.entries(grouped).filter(([, rows]) => rows.length >= 2)
+  }, [results])
 
   return (
     <AppShell>
@@ -104,6 +110,30 @@ export default function PatientDetail() {
                 Statistical trend, not machine learning — based on percentage change, moving
                 average, and slope of each result's distance from the normal range over time.
               </p>
+            </div>
+          )}
+
+          {chartGroups.length > 0 && (
+            <div className="mb-6">
+              <h2 className="text-sm font-semibold text-text-primary mb-3">Charts</h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {chartGroups.map(([analyte, rows]) => {
+                  const latest = [...rows].sort(
+                    (a, b) => new Date(b.test_date) - new Date(a.test_date)
+                  )[0]
+                  return (
+                    <div key={analyte} className="bg-surface border border-line rounded-xl p-4 shadow-card">
+                      <p className="text-sm font-medium text-text-primary mb-2">{analyte}</p>
+                      <TrendChart
+                        results={rows}
+                        refLow={latest.ref_low}
+                        refHigh={latest.ref_high}
+                        unit={latest.unit}
+                      />
+                    </div>
+                  )
+                })}
+              </div>
             </div>
           )}
 

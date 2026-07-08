@@ -19,9 +19,20 @@ export function computeTrend(results, refLow, refHigh) {
   // that a trend label only appears once there's enough history.
   if (!results || results.length < 3) return null
 
-  const sorted = [...results].sort(
-    (a, b) => new Date(a.test_date) - new Date(b.test_date)
-  )
+  // Postgres `numeric` columns are serialized as JSON strings (confirmed
+  // Postgres/PostgREST behavior, to avoid floating-point precision loss),
+  // so these can arrive as "3.9" rather than 3.9. Most operators below
+  // (<, >, -, *) auto-coerce strings to numbers safely, but `+` between
+  // two strings concatenates instead of adding — explicitly convert
+  // everything here so the calculation is correct regardless of what
+  // shape the data arrives in.
+  refLow = Number(refLow)
+  refHigh = Number(refHigh)
+
+  const sorted = [...results]
+    .map((r) => ({ ...r, value: Number(r.value) }))
+    .sort((a, b) => new Date(a.test_date) - new Date(b.test_date))
+
   const mid = (refLow + refHigh) / 2
   const half = (refHigh - refLow) / 2
 
@@ -71,13 +82,20 @@ export function computeTrend(results, refLow, refHigh) {
 }
 
 // Groups a flat list of lab_results rows (mixed analytes) into
-// { [analyte]: trendResult } for every analyte with enough history.
-export function computeTrendsByAnalyte(results) {
+// { [analyte]: rows[] }. Shared by trend computation and chart rendering.
+export function groupByAnalyte(results) {
   const byAnalyte = {}
   for (const r of results) {
     if (!byAnalyte[r.analyte]) byAnalyte[r.analyte] = []
     byAnalyte[r.analyte].push(r)
   }
+  return byAnalyte
+}
+
+// Groups a flat list of lab_results rows (mixed analytes) into
+// { [analyte]: trendResult } for every analyte with enough history.
+export function computeTrendsByAnalyte(results) {
+  const byAnalyte = groupByAnalyte(results)
 
   const trends = {}
   for (const [analyte, rows] of Object.entries(byAnalyte)) {

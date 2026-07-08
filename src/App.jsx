@@ -11,6 +11,7 @@ import ClinicianPatients from './pages/clinician/ClinicianPatients'
 import PatientDetail from './pages/clinician/PatientDetail'
 import ResultEntry from './pages/clinician/ResultEntry'
 import PatientDashboard from './pages/patient/PatientDashboard'
+import PatientTrends from './pages/patient/PatientTrends'
 
 const HOME_BY_ROLE = { admin: '/admin', clinician: '/clinician', patient: '/patient' }
 
@@ -84,10 +85,18 @@ export default function App() {
         }
       />
       <Route
-        path="/patient/*"
+        path="/patient"
         element={
           <ProtectedRoute allowedRoles={['patient']}>
             <PatientDashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/patient/trends"
+        element={
+          <ProtectedRoute allowedRoles={['patient']}>
+            <PatientTrends />
           </ProtectedRoute>
         }
       />
